@@ -1,52 +1,135 @@
+'use strict'
+
 var server = require('./server')
-  , assert = require('assert')
-  , request = require('../main.js')
-  , Cookie = require('../vendor/cookie')
-  , Jar = require('../vendor/cookie/jar')
-  , s = server.createServer()
+  , request = require('../index')
+  , util = require('util')
+  , tape = require('tape')
 
-s.listen(s.port, function () {
-  var serverUri = 'http://localhost:' + s.port
-    , numTests = 0
-    , numOutstandingTests = 0
+var s = server.createServer()
 
-  function createTest(requestObj, serverAssertFn) {
-    var testNumber = numTests;
-    numTests += 1;
-    numOutstandingTests += 1;
-    s.on('/' + testNumber, function (req, res) {
-      serverAssertFn(req, res);
-      res.writeHead(200);
-      res.end();
-    });
-    requestObj.url = serverUri + '/' + testNumber
-    request(requestObj, function (err, res, body) {
-      assert.ok(!err)
-      assert.equal(res.statusCode, 200)
-      numOutstandingTests -= 1
-      if (numOutstandingTests === 0) {
-        console.log(numTests + ' tests passed.')
-        s.close()
-      }
+s.on('/redirect/from', function(req, res) {
+  res.writeHead(301, {
+    location : '/redirect/to'
+  })
+  res.end()
+})
+
+s.on('/redirect/to', function(req, res) {
+  res.end('ok')
+})
+
+tape('setup', function(t) {
+  s.listen(s.port, function() {
+    t.end()
+  })
+})
+
+function runTest(name, path, requestObj, serverAssertFn) {
+  tape(name, function(t) {
+    s.on('/' + path, function(req, res) {
+      serverAssertFn(t, req, res)
+      res.writeHead(200)
+      res.end()
     })
+    requestObj.url = s.url + '/' + path
+    request(requestObj, function(err, res, body) {
+      t.equal(err, null)
+      t.equal(res.statusCode, 200)
+      t.end()
+    })
+  })
+}
+
+runTest(
+  '#125: headers.cookie with no cookie jar',
+  'no-jar',
+  {headers: {cookie: 'foo=bar'}},
+  function(t, req, res) {
+    t.equal(req.headers.cookie, 'foo=bar')
+  })
+
+var jar = request.jar()
+jar.setCookie('quux=baz', s.url)
+runTest(
+  '#125: headers.cookie + cookie jar',
+  'header-and-jar',
+  {jar: jar, headers: {cookie: 'foo=bar'}},
+  function(t, req, res) {
+    t.equal(req.headers.cookie, 'foo=bar; quux=baz')
+  })
+
+var jar2 = request.jar()
+jar2.setCookie('quux=baz; Domain=foo.bar.com', s.url, {ignoreError: true})
+runTest(
+  '#794: ignore cookie parsing and domain errors',
+  'ignore-errors',
+  {jar: jar2, headers: {cookie: 'foo=bar'}},
+  function(t, req, res) {
+    t.equal(req.headers.cookie, 'foo=bar')
+  })
+
+runTest(
+  '#784: override content-type when json is used',
+  'json',
+  {
+    json: true,
+    method: 'POST',
+    headers: { 'content-type': 'application/json; charset=UTF-8' },
+    body: { hello: 'my friend' }},
+  function(t, req, res) {
+    t.equal(req.headers['content-type'], 'application/json; charset=UTF-8')
+  }
+)
+
+runTest(
+  'neither headers.cookie nor a cookie jar is specified',
+  'no-cookie',
+  {},
+  function(t, req, res) {
+    t.equal(req.headers.cookie, undefined)
+  })
+
+tape('upper-case Host header and redirect', function(t) {
+  // Horrible hack to observe the raw data coming to the server (before Node
+  // core lower-cases the headers)
+  var rawData = ''
+  s.on('connection', function(socket) {
+    var ondata = socket.ondata
+    socket.ondata = function(d, start, end) {
+      rawData += d.slice(start, end).toString()
+      return ondata.apply(this, arguments)
+    }
+  })
+
+  function checkHostHeader(host) {
+    t.ok(
+      new RegExp('^Host: ' + host + '$', 'm').test(rawData),
+      util.format(
+        'Expected "Host: %s" in data "%s"',
+        host, rawData.trim().replace(/\r?\n/g, '\\n')))
+    rawData = ''
   }
 
-  // Issue #125: headers.cookie shouldn't be replaced when a cookie jar isn't specified
-  createTest({headers: {cookie: 'foo=bar'}}, function (req, res) {
-    assert.ok(req.headers.cookie)
-    assert.equal(req.headers.cookie, 'foo=bar')
+  var redirects = 0
+  request({
+    url : s.url + '/redirect/from',
+    headers : { Host : '127.0.0.1' }
+  }, function(err, res, body) {
+    t.equal(err, null)
+    t.equal(res.statusCode, 200)
+    t.equal(body, 'ok')
+    t.equal(redirects, 1)
+    // XXX should the host header change like this after a redirect?
+    checkHostHeader('localhost:' + s.port)
+    t.end()
+  }).on('redirect', function() {
+    redirects++
+    t.equal(this.uri.href, s.url + '/redirect/to')
+    checkHostHeader('127.0.0.1')
   })
+})
 
-  // Issue #125: headers.cookie + cookie jar
-  var jar = new Jar()
-  jar.add(new Cookie('quux=baz'));
-  createTest({jar: jar, headers: {cookie: 'foo=bar'}}, function (req, res) {
-    assert.ok(req.headers.cookie)
-    assert.equal(req.headers.cookie, 'foo=bar; quux=baz')
-  })
-
-  // There should be no cookie header when neither headers.cookie nor a cookie jar is specified
-  createTest({}, function (req, res) {
-    assert.ok(!req.headers.cookie)
-  })
+tape('cleanup', function(t) {
+  s.close()
+  t.end()
 })

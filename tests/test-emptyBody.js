@@ -4,9 +4,9 @@ var request = require('../index')
   , http = require('http')
   , tape = require('tape')
 
-var s = http.createServer(function (req, res) {
-  res.statusCode = 200
-  res.end('asdf')
+var s = http.createServer(function (req, resp) {
+  resp.statusCode = 200
+  resp.end('')
 })
 
 tape('setup', function(t) {
@@ -15,17 +15,23 @@ tape('setup', function(t) {
   })
 })
 
-tape('pool', function(t) {
+tape('empty body', function(t) {
+  request('http://localhost:6767', function(err, res, body) {
+    t.equal(err, null)
+    t.equal(res.statusCode, 200)
+    t.equal(body, '')
+    t.end()
+  })
+})
+
+tape('empty JSON body', function(t) {
   request({
     url: 'http://localhost:6767',
-    pool: false
+    json: {}
   }, function(err, res, body) {
     t.equal(err, null)
     t.equal(res.statusCode, 200)
-    t.equal(body, 'asdf')
-
-    var agent = res.request.agent
-    t.equal(agent, false)
+    t.equal(body, undefined)
     t.end()
   })
 })

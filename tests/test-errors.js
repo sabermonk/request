@@ -1,37 +1,79 @@
+'use strict'
+
 var server = require('./server')
-  , events = require('events')
-  , assert = require('assert')
-  , request = require('../main.js')
-  ;
+  , request = require('../index')
+  , tape = require('tape')
 
 var local = 'http://localhost:8888/asdf'
 
-try {
-  request({uri:local, body:{}})
-  assert.fail("Should have throw") 
-} catch(e) {
-  assert.equal(e.message, 'Argument error, options.body.')
-}
+tape('without uri', function(t) {
+  t.throws(function() {
+    request({})
+  }, /^Error: options\.uri is a required argument$/)
+  t.end()
+})
 
-try {
-  request({uri:local, multipart: 'foo'})
-  assert.fail("Should have throw")
-} catch(e) {
-  assert.equal(e.message, 'Argument error, options.multipart.')
-}
+tape('invalid uri 1', function(t) {
+  t.throws(function() {
+    request({
+      uri: 'this-is-not-a-valid-uri'
+    })
+  }, /^Error: Invalid URI/)
+  t.end()
+})
 
-try {
-  request({uri:local, multipart: [{}]})
-  assert.fail("Should have throw")
-} catch(e) {
-  assert.equal(e.message, 'Body attribute missing in multipart.')
-}
+tape('invalid uri 2', function(t) {
+  t.throws(function() {
+    request({
+      uri: 'github.com/uri-is-not-valid-without-protocol'
+    })
+  }, /^Error: Invalid URI/)
+  t.end()
+})
 
-try {
-  request(local, {multipart: [{}]})
-  assert.fail("Should have throw")
-} catch(e) {
-  assert.equal(e.message, 'Body attribute missing in multipart.')
-}
+tape('deprecated unix URL', function(t) {
+  t.throws(function() {
+    request({
+      uri: 'unix://path/to/socket/and/then/request/path'
+    })
+  }, /^Error: `unix:\/\/` URL scheme is no longer supported/)
+  t.end()
+})
 
-console.log("All tests passed.")
+tape('invalid body', function(t) {
+  t.throws(function() {
+    request({
+      uri: local, body: {}
+    })
+  }, /^Error: Argument error, options\.body\.$/)
+  t.end()
+})
+
+tape('invalid multipart', function(t) {
+  t.throws(function() {
+    request({
+      uri: local,
+      multipart: 'foo'
+    })
+  }, /^Error: Argument error, options\.multipart\.$/)
+  t.end()
+})
+
+tape('multipart without body 1', function(t) {
+  t.throws(function() {
+    request({
+      uri: local,
+      multipart: [ {} ]
+    })
+  }, /^Error: Body attribute missing in multipart\.$/)
+  t.end()
+})
+
+tape('multipart without body 2', function(t) {
+  t.throws(function() {
+    request(local, {
+      multipart: [ {} ]
+    })
+  }, /^Error: Body attribute missing in multipart\.$/)
+  t.end()
+})
